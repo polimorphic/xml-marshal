@@ -2,11 +2,12 @@
 
 module Text.XML.Marshal
     ( FromXml, FromXmlList, ToXml, ToXmlList
-    , contents, fromXml, fromXmlList, toXml, toXmlList
-    , (..:), (.:)
+    , contents, fromXml, fromXmlList, getAttribute, lookupAttribute, toXml, toXmlList
+    , (..:), (.:), (.:?)
     ) where
 
 import Control.Monad ((<=<), (>=>))
+import Data.Map ((!?))
 import Data.Monoid ((<>))
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -14,7 +15,7 @@ import Data.Time (Day, UTCTime, defaultTimeLocale, formatTime, parseTimeM)
 import Text.Read (readMaybe)
 import Text.XML
     ( Element, Name, Node(NodeComment, NodeContent, NodeElement, NodeInstruction)
-    , elementName, elementNodes
+    , elementAttributes, elementName, elementNodes
     )
 
 
@@ -116,13 +117,24 @@ contents :: FromXml a => Element -> Either Text a
 contents = fromXml . elementNodes
 
 (.:) :: FromXml a => Element -> Name -> Either Text a
-e .: k = e ..: k >>= \case
-    [] -> Left "No matching elements found"
-    [x] -> pure x
+e .: k = e .:? k >>= \case
+    Nothing -> Left "No matching elements found"
+    Just x -> pure x
+
+(.:?) :: FromXml a => Element -> Name -> Either Text (Maybe a)
+e .:? k = e ..: k >>= \case
+    [] -> pure Nothing
+    [x] -> pure $ Just x
     _ -> Left "More than one matching element found"
 
 (..:) :: FromXml a => Element -> Name -> Either Text [a]
 e ..: k = traverse (fromXml . toXml) . filter ((== k) . elementName) =<< contents e
+
+getAttribute :: Name -> Element -> Either Text Text
+getAttribute n e = maybe (Left "No matching attribute found") pure $ lookupAttribute n e
+
+lookupAttribute :: Name -> Element -> Maybe Text
+lookupAttribute n e = elementAttributes e !? n
 
 
 maybeToEither :: a -> Maybe b -> Either a b
