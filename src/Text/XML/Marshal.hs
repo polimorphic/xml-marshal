@@ -20,7 +20,6 @@ import Text.XML
     ( Document, Element, Name, Node(NodeComment, NodeContent, NodeElement, NodeInstruction)
     , elementAttributes, elementName, elementNodes
     )
-import Text.XML
 
 class FromXmlDocument a where
     fromXmlDocument :: Document -> Either Text a
