@@ -1,8 +1,11 @@
 {-# LANGUAGE LambdaCase, OverloadedStrings #-}
 
 module Text.XML.Marshal
-    ( FromXml, FromXmlList, ToXml, ToXmlList
-    , contents, fromXml, fromXmlList, getAttribute, lookupAttribute, toXml, toXmlList
+    ( FromXmlDocument, FromXmlFragment, ListFromXmlFragment
+    , ListToXmlFragment, ToXmlDocument, ToXmlFragment
+    , contents, fromXmlDocument, fromXmlFragment, getAttribute
+    , listFromXmlFragment, listToXmlFragment, lookupAttribute
+    , toXmlDocument, toXmlFragment
     , (..:), (.:), (.:?)
     ) where
 
@@ -14,121 +17,129 @@ import qualified Data.Text as T
 import Data.Time (Day, UTCTime, defaultTimeLocale, formatTime, parseTimeM)
 import Text.Read (readMaybe)
 import Text.XML
-    ( Element, Name, Node(NodeComment, NodeContent, NodeElement, NodeInstruction)
+    ( Document, Element, Name, Node(NodeComment, NodeContent, NodeElement, NodeInstruction)
     , elementAttributes, elementName, elementNodes
     )
+import Text.XML
+
+class FromXmlDocument a where
+    fromXmlDocument :: Document -> Either Text a
+
+class FromXmlFragment a where
+    fromXmlFragment :: [Node] -> Either Text a
+
+class ListFromXmlFragment a where
+    listFromXmlFragment :: [Node] -> Either Text [a]
+
+class ListToXmlFragment a where
+    listToXmlFragment :: [a] -> [Node]
+
+class ToXmlDocument a where
+    toXmlDocument :: a -> Document
+
+class ToXmlFragment a where
+    toXmlFragment :: a -> [Node]
 
 
-class FromXml a where
-    fromXml :: [Node] -> Either Text a
+instance ListFromXmlFragment a => FromXmlFragment [a] where
+    fromXmlFragment = listFromXmlFragment
 
-class FromXmlList a where
-    fromXmlList :: [Node] -> Either Text [a]
-
-class ToXml a where
-    toXml :: a -> [Node]
-
-class ToXmlList a where
-    toXmlList :: [a] -> [Node]
+instance ListToXmlFragment a => ToXmlFragment [a] where
+    toXmlFragment = listToXmlFragment
 
 
-instance FromXmlList a => FromXml [a] where
-    fromXml = fromXmlList
+instance FromXmlFragment Node where
+    fromXmlFragment [] = Left "No nodes found"
+    fromXmlFragment [n] = pure n
+    fromXmlFragment _ = Left "More than one node found"
 
-instance ToXmlList a => ToXml [a] where
-    toXml = toXmlList
+instance ListFromXmlFragment Node where
+    listFromXmlFragment = pure
 
+instance ToXmlFragment Node where
+    toXmlFragment = pure
 
-instance FromXml Node where
-    fromXml [] = Left "No nodes found"
-    fromXml [n] = pure n
-    fromXml _ = Left "More than one node found"
-
-instance FromXmlList Node where
-    fromXmlList = pure
-
-instance ToXml Node where
-    toXml = pure
-
-instance ToXmlList Node where
-    toXmlList = id
+instance ListToXmlFragment Node where
+    listToXmlFragment = id
 
 
-instance FromXml Element where
-    fromXml = fromXml >=> \case
+instance FromXmlFragment Element where
+    fromXmlFragment = fromXmlFragment >=> \case
         [] -> Left "No elements found"
         [e] -> pure e
         _ -> Left "More than one element found"
 
-instance FromXmlList Element where
-    fromXmlList [] = pure []
-    fromXmlList (NodeElement e : ns) = (e :) <$> fromXml ns
-    fromXmlList (_ : ns) = fromXml ns
+instance ListFromXmlFragment Element where
+    listFromXmlFragment [] = pure []
+    listFromXmlFragment (NodeElement e : ns) = (e :) <$> fromXmlFragment ns
+    listFromXmlFragment (_ : ns) = fromXmlFragment ns
 
-instance ToXml Element where
-    toXml e = [NodeElement e]
+instance ToXmlFragment Element where
+    toXmlFragment e = [NodeElement e]
 
-instance ToXmlList Element where
-    toXmlList = fmap NodeElement
-
-
-instance FromXml Text where
-    fromXml (NodeElement e : ns) = (<>) <$> fromXml (elementNodes e) <*> fromXml ns
-    fromXml (NodeInstruction _ : ns) = fromXml ns
-    fromXml (NodeContent t : ns) = (t <>) <$> fromXml ns
-    fromXml (NodeComment _ : ns) = fromXml ns
-    fromXml [] = pure ""
-
-instance ToXml Text where
-    toXml t = [NodeContent t]
+instance ListToXmlFragment Element where
+    listToXmlFragment = fmap NodeElement
 
 
-instance FromXmlList Char where
-    fromXmlList = fmap T.unpack . fromXml
+instance FromXmlFragment Text where
+    fromXmlFragment (NodeElement e : ns) = (<>) <$> fromXmlFragment (elementNodes e) <*> fromXmlFragment ns
+    fromXmlFragment (NodeInstruction _ : ns) = fromXmlFragment ns
+    fromXmlFragment (NodeContent t : ns) = (t <>) <$> fromXmlFragment ns
+    fromXmlFragment (NodeComment _ : ns) = fromXmlFragment ns
+    fromXmlFragment [] = pure ""
 
-instance ToXmlList Char where
-    toXmlList = toXml . T.pack
-
-
-instance FromXml Int where
-    fromXml = maybeToEither "Invalid Int" . readMaybe <=< fromXml
-
-instance ToXml Int where
-    toXml = toXml . show
+instance ToXmlFragment Text where
+    toXmlFragment t = [NodeContent t]
 
 
-instance FromXml Day where
-    fromXml = maybeToEither "Invalid Day" . parseTimeM True defaultTimeLocale "%Y-%m-%d" <=< fromXml
+instance ListFromXmlFragment Char where
+    listFromXmlFragment = fmap T.unpack . fromXmlFragment
 
-instance ToXml Day where
-    toXml = toXml . formatTime defaultTimeLocale "%Y-%m-%d"
-
-
-instance FromXml UTCTime where
-    fromXml = maybeToEither "Invalid UTCTime"
-            . parseTimeM True defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ"
-          <=< fromXml
-
-instance ToXml UTCTime where
-    toXml = toXml . formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ"
+instance ListToXmlFragment Char where
+    listToXmlFragment = toXmlFragment . T.pack
 
 
-contents :: FromXml a => Element -> Either Text a
-contents = fromXml . elementNodes
+instance FromXmlFragment Int where
+    fromXmlFragment = maybeToEither "Invalid Int" . readMaybe <=< fromXmlFragment
 
-(.:) :: FromXml a => Element -> Name -> Either Text a
+instance ToXmlFragment Int where
+    toXmlFragment = toXmlFragment . show
+
+
+instance FromXmlFragment Day where
+    fromXmlFragment = maybeToEither "Invalid Day"
+                    . parseTimeM True defaultTimeLocale "%Y-%m-%d"
+                  <=< fromXmlFragment
+
+instance ToXmlFragment Day where
+    toXmlFragment = toXmlFragment . formatTime defaultTimeLocale "%Y-%m-%d"
+
+
+instance FromXmlFragment UTCTime where
+    fromXmlFragment = maybeToEither "Invalid UTCTime"
+                    . parseTimeM True defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ"
+                  <=< fromXmlFragment
+
+instance ToXmlFragment UTCTime where
+    toXmlFragment = toXmlFragment . formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ"
+
+
+contents :: FromXmlFragment a => Element -> Either Text a
+contents = fromXmlFragment . elementNodes
+
+(.:) :: FromXmlFragment a => Element -> Name -> Either Text a
 e .: k = e .:? k >>= \case
     Nothing -> Left "No matching elements found"
     Just x -> pure x
 
-(.:?) :: FromXml a => Element -> Name -> Either Text (Maybe a)
+(.:?) :: FromXmlFragment a => Element -> Name -> Either Text (Maybe a)
 e .:? k = e ..: k >>= \case
     [] -> pure Nothing
     [x] -> pure $ Just x
     _ -> Left "More than one matching element found"
 
-(..:) :: FromXml a => Element -> Name -> Either Text [a]
-e ..: k = traverse (fromXml . toXml) . filter ((== k) . elementName) =<< contents e
+(..:) :: FromXmlFragment a => Element -> Name -> Either Text [a]
+e ..: k = traverse (fromXmlFragment . toXmlFragment) . filter ((== k) . elementName) =<< contents e
 
 getAttribute :: Name -> Element -> Either Text Text
 getAttribute n e = maybe (Left "No matching attribute found") pure $ lookupAttribute n e
